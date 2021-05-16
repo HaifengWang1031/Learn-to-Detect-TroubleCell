@@ -188,24 +188,6 @@ class CL_Solver:
             # self.draw_whole()
             self.render()
         
-    def draw_whole(self):
-        n = len(self.WeightContainer[0,:])
-        plt.ion()
-        for i in range(n):
-            self.draw_step(self.WeightContainer[:,i])
-            plt.pause(self.delta_t)
-            plt.clf()
-        plt.ioff()
-
-    def draw_step(self,weights):
-        for e,i in enumerate(range(0,len(weights),self.N)):
-            x_e = np.linspace(self.x_h[e][0],self.x_h[e][1])
-            result_local = np.zeros_like(x_e)
-            for j in range(self.N):
-                result_local += weights[i+j]*self.basis[j]((2*x_e - (self.x_h[e][0]+self.x_h[e][1]))/self.delta_x[e])
-            plt.plot(x_e,result_local)
-            plt.draw()
-    
     def get_node_value(self):
         node_per_ele = 10
         for t in range(0,len(self.WeightContainer[0])):
@@ -254,9 +236,25 @@ class CL_Solver:
         
         ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = False)
         plt.show()
+
+    def draw_whole(self):
+        n = len(self.WeightContainer[0,:])
+        plt.ion()
+        for i in range(n):
+            self.draw_step(self.WeightContainer[:,i])
+            plt.pause(self.delta_t)
+            plt.clf()
+        plt.ioff()
+
+    def draw_step(self,weights):
+        for e,i in enumerate(range(0,len(weights),self.N)):
+            x_e = np.linspace(self.x_h[e][0],self.x_h[e][1])
+            result_local = np.zeros_like(x_e)
+            for j in range(self.N):
+                result_local += weights[i+j]*self.basis[j]((2*x_e - (self.x_h[e][0]+self.x_h[e][1]))/self.delta_x[e])
+            plt.plot(x_e,result_local)
+            plt.draw()
         
-
-
         
 if __name__ == "__main__":
     #config
