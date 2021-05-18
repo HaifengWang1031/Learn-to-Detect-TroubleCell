@@ -43,7 +43,7 @@ def minmod_limiter(a,b,c,*args):
     else:
         return 0
 
-def TVB_limiter(a,b,c,h,M =1000):
+def TVB_limiter(a,b,c,h,M =10):
     if np.abs(a) <= M*h**2:
         return a
     else:
@@ -52,7 +52,7 @@ def TVB_limiter(a,b,c,h,M =1000):
 # initial wave for Linear advection equation
 def sine_wave(x):
     # x in [0,1]
-    return np.sin(2*np.pi*x)
+    return np.sin(10*np.pi*x)
 
 def multi_wave(x):
     # x in [0,1.4]
@@ -99,6 +99,31 @@ def b_l_initial(x):
         return 0.95*np.ones_like(x)
     elif x< 0.5:
         return 0.1*np.ones_like(x)
+
+def transfer_wave(init_func,interval,velocity):
+    assert interval[1] > interval[0]
+    len_interval = interval[1] - interval[0]
+    # periodic expension
+    @eleMapping
+    def Periodic_func(x):
+        if interval[0]<x<=interval[1]:
+            return init_func(x)
+        elif x > interval[1]:
+            return Periodic_func(x-len_interval)
+        elif x <= interval[0]:
+            return Periodic_func(x+len_interval)
+    return lambda x,t:Periodic_func(x-velocity*t)
+
+def eleMapping(n_func):
+    def wrapTheFunction(x):
+        if x.ndim == 0:
+            return n_func(x)
+        elif x.ndim == 1:
+            result = np.empty_like(x)
+            for i,n in enumerate(x):
+                result[i] = n_func(n)
+            return result
+    return wrapTheFunction
 
 if __name__ == "__main__":
     baseline_basis(3)

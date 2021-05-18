@@ -1,11 +1,15 @@
 import numpy as np
 from numpy.core.fromnumeric import repeat
 import scipy.integrate as integrate
-from utils import *
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import sympy
 from tqdm import trange
+
+if __name__ == "__main__":
+    from utils import *
+else:
+    from DG.utils import *
 
 
 class CL_Solver:
@@ -81,7 +85,8 @@ class CL_Solver:
         cell_quantites = np.zeros((self.K,5))
         for i in range(self.K):
             # cell average values
-            cell_quantites[i,0] = integrate.quad(local_func,-1,1,args = (i,))[0]/2
+            cell_quantites[i,0] =  weights[i,0]   #integrate.quad(local_func,-1,1,args = (i,))[0]/2
+
         for e in range(self.K):
             # forward difference
             cell_quantites[e,1] = cell_quantites[e,0] - cell_quantites[e-1,0]
@@ -93,37 +98,39 @@ class CL_Solver:
         return cell_quantites
 
     def trouble_cell_indicator(self,cell_quantites,slope_limiter):
+        tol = 1e-4
         # calculate modified cell-interface value
         cell_tilde = np.zeros((self.K,2))
         cell_indicator = np.zeros((self.K,1),dtype=np.bool8)
         for e in range(self.K):
-            cell_tilde[e,0] = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
-            cell_tilde[e,1] = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
-            if np.abs(cell_tilde[e,0]- cell_quantites[e,5])>1e-9 or np.abs(cell_tilde[e,1] -cell_quantites[e,6])>1e-9:
+            cell_tilde[e,0] = cell_quantites[e,0] - slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+            cell_tilde[e,1] = cell_quantites[e,0] + slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+            if np.abs(cell_tilde[e,0]-cell_quantites[e,5])>tol or np.abs(cell_tilde[e,1]-cell_quantites[e,6])>tol:
                 cell_indicator[e,0] = True
         self.Trouble_Cell = np.concatenate((self.Trouble_Cell,cell_indicator),axis =1)
         return cell_indicator
 
     def poly_reconstruction(self,BasisWeights,cell_indicator,cell_quantites,slope_limiter):
         weights = np.reshape(BasisWeights,(self.K,self.N))
-        # local_Dfunc = lambda x,i:sum([weights[i][j]*self.Dbasis[j](x) for j in range(self.N)])
+        Dfunc = lambda x,i:sum([weights[i][j]*self.Dbasis[j](x) for j in range(self.N)])
 
         for e in range(self.K):
             if cell_indicator[e,0]:
                 #step 2. use a suitable limiter to reconstructing the polynomial solution
-                weights[e,:] = 0.
                 # Baseline Reconstructer
-                left_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e],self.delta_x[e])
-                right_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e],self.delta_x[e])
-                weights[e,0] = (left_interface_value + right_interface_value)/2
-                weights[e,1] = (left_interface_value - right_interface_value)/2
+                # left_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                # right_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                # weights[e,:] = 0.
+                # weights[e,0] = (left_interface_value + right_interface_value)/2
+                # weights[e,1] = (left_interface_value - right_interface_value)/2
                 
                 # classic MUSCL reconstruction
-                # slope = slope_limiter(local_Dfunc(0,e), 
-                #     (cell_quantites[e,0] - cell_quantites[e-1,0])/(self.delta_x[e]/2), 
-                #     (cell_quantites[e+1 if e<self.K-1 else 0,0] - cell_quantites[e,0])/(self.delta_x[e]/2))
-                # weights[e,0] = cell_quantites[e,0] + slope
-                # weights[e,1] = slope
+                slope = slope_limiter(weights[e,1], 
+                    (cell_quantites[e,0] - cell_quantites[e-1,0])/(self.delta_x[e]), 
+                    (cell_quantites[e+1 if e<self.K-1 else 0,0] - cell_quantites[e,0])/(self.delta_x[e]),self.delta_x[e])
+                weights[e,:] = 0.
+                weights[e,0] = cell_quantites[e,0]
+                weights[e,1] = slope
         return weights
         
 
@@ -148,11 +155,16 @@ class CL_Solver:
         self.WeightContainer = self.BasisWeights
 
         # set the flux term and calculate alpha
+        self.init_func = init_func
         self.flux = flux
         x = sympy.Symbol("x")
         flux_sym = flux(x)
         dflux = sympy.lambdify(x,sympy.diff(flux_sym,x),"numpy")
-        self.max_dflux = np.max(dflux(self.x_node))
+        
+        init_flux = []
+        for x in self.x_node:
+            init_flux.append(init_func(x))
+        self.max_dflux = np.max(np.abs(dflux(np.array(init_flux))))
 
         self.Trouble_Cell = np.zeros((self.K,1),dtype=np.bool8)
 
@@ -185,11 +197,13 @@ class CL_Solver:
 
         self.get_node_value()
         if render:
-            # self.draw_whole()
+            # self.draw_allT()
             self.render()
+            if use_limiter:
+                self.draw_troubleCell()
         
     def get_node_value(self):
-        node_per_ele = 10
+        node_per_ele = 5
         for t in range(0,len(self.WeightContainer[0])):
             for e,i in enumerate(range(0,len(self.WeightContainer[:,t]),self.N)):
                 x_e = np.linspace(self.x_h[e][0],self.x_h[e][1],
@@ -216,11 +230,14 @@ class CL_Solver:
                 solu_value = np.vstack((solu_value,current_value))
         return node_point,solu_value
 
-    def render(self):
+    def render(self,save = False):
         node_point,solu_value = self.get_node_value()
 
+        # f = transfer_wave(self.init_func,self.space_interval,2)
+        
         fig,ax = plt.subplots() 
-        line, = ax.plot(node_point,solu_value[0])
+        # real_line, = ax.plot(node_point,f(node_point,0),"r.-")        
+        line, = ax.plot(node_point,solu_value[0],"b")
 
         def init():
             ax.set_xlim(self.space_interval[0],self.space_interval[1])
@@ -230,14 +247,15 @@ class CL_Solver:
             return line,
 
         def update(t):
+            # real_line.set_ydata(f(node_point,t*self.delta_t))
             line.set_ydata(solu_value[t,:])
             ax.set_title(f"t = {self.delta_t*t:.4f}s")
-            return line,
+            return line,#real_line
         
         ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = False)
         plt.show()
 
-    def draw_whole(self):
+    def draw_allT(self):
         n = len(self.WeightContainer[0,:])
         plt.ion()
         for i in range(n):
@@ -254,21 +272,45 @@ class CL_Solver:
                 result_local += weights[i+j]*self.basis[j]((2*x_e - (self.x_h[e][0]+self.x_h[e][1]))/self.delta_x[e])
             plt.plot(x_e,result_local)
             plt.draw()
+            plt.show()
+    
+    def draw_troubleCell(self):
+        fig,ax = plt.subplots()
+        image = 1-np.rot90(self.Trouble_Cell.astype(np.int8))
+        ax.imshow(image,vmin = 0,vmax = 1,cmap = "gray")
+        ax.set(title="Trouble Cell Visualize",xlabel="x",ylabel="t")
+        # Move left and bottom spines outward by 10 points
+        ax.spines.left.set_position(('outward', 10))
+        ax.spines.bottom.set_position(('outward', 10))
+        # Hide the right and top spines
+        ax.spines.right.set_visible(False)
+        ax.spines.top.set_visible(False)
+        # Only show ticks on the left and bottom spines
+        ax.yaxis.set_ticks_position('left')
+        ax.xaxis.set_ticks_position('bottom')
+        ax.set_xticks(range(0,len(self.x_node)+1,len(self.x_node)//4))
+        ax.set_xticklabels(self.x_node[::len(self.x_node)//4])
+        
+        plt.show()
+        
         
         
 if __name__ == "__main__":
     #config
     basis = legendre_basis
-    basis_order = 4
+    basis_order = 3
     init_func = sine_wave
-    space_interval = [0,1]
+    space_interval = 0,1
     flux = lambda x:x**2/2
     ele_num = 100
-    final_time = 1
-    cfl = 0.1
-    evolution_method = "RK3"
+    final_time = .1
+    cfl = 0.05
+    evolution_method = ["Euler","RK2","RK3"][2]
     use_limiter = True
-    slope_limiter = minmod_limiter
+    slope_limiter = [minmod_limiter, #minmod
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,100), # TVB-2
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][3] # TVB-3
     render = True
 
     solver = CL_Solver(basis,basis_order)
