@@ -36,14 +36,14 @@ def baseline_basis(deg = 2):
     
     return list(map(lambda func:sympy.lambdify(x,func,"numpy"),basis)),list(map(lambda func:sympy.lambdify(x,func,"numpy"),Dbasis))
 
-
+# Limiter
 def minmod_limiter(a,b,c,*args):
     if np.sign(a) == np.sign(b) == np.sign(c):
         return np.sign(a)*np.min([np.abs(a),np.abs(b),np.abs(c)])
     else:
         return 0
 
-def TVB_limiter(a,b,c,h,M =10):
+def TVB_limiter(a,b,c,h,M):
     if np.abs(a) <= M*h**2:
         return a
     else:
@@ -100,9 +100,11 @@ def b_l_initial(x):
     elif x< 0.5:
         return 0.1*np.ones_like(x)
 
+
 def transfer_wave(init_func,interval,velocity):
     assert interval[1] > interval[0]
     len_interval = interval[1] - interval[0]
+
     # periodic expension
     @eleMapping
     def Periodic_func(x):
@@ -126,4 +128,4 @@ def eleMapping(n_func):
     return wrapTheFunction
 
 if __name__ == "__main__":
-    baseline_basis(3)
+    pass

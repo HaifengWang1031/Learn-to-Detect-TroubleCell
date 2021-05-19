@@ -47,6 +47,7 @@ class CL_Solver:
         # transfer the weight to local func
         weights = np.reshape(weights,(self.K,self.N))
         local_func = lambda x,i:sum([weights[i][j]*self.basis[j](x) for j in range(self.N)])
+        d_local_func = lambda x,i:sum([weights[i][j]*self.Dbasis[j](x) for j in range(self.N)])
 
         # local flux 
         f_u = lambda x,i:self.flux(local_func(x,i))
@@ -62,6 +63,12 @@ class CL_Solver:
                 #2.RHS_interger
                 rhs_interger = integrate.quad(lambda x:f_u(x,e)*self.Dbasis[i](x),-1,1)[0]
                 result[i][e] = rhs_interger + num_flux_l - num_flux_r
+                #3. Artifical_viscosity
+                if self.alpha:
+                    artifical_viscosity = integrate.quad(lambda x:d_local_func(x,e)*self.Dbasis[i](x),-1,1)[0]
+                    viscosity_flux_r = 1/2*(d_local_func(1,e) + d_local_func(-1,e+1 if e<self.K-1 else 0))*self.basis[i](1)
+                    viscosity_flux_l = 1/2*(d_local_func(-1,e) + d_local_func(1,e-1))*self.basis[i](-1)
+                    result[i][e] -=  self.alpha*(artifical_viscosity -viscosity_flux_r + viscosity_flux_l)*(self.delta_x[e]/2) 
             result[:,e] = np.linalg.solve(self.mass_matrix,result[:,e])/(self.delta_x[e]/2)
         return np.reshape(result,(-1,1),"F")
 
@@ -110,31 +117,34 @@ class CL_Solver:
         self.Trouble_Cell = np.concatenate((self.Trouble_Cell,cell_indicator),axis =1)
         return cell_indicator
 
-    def poly_reconstruction(self,BasisWeights,cell_indicator,cell_quantites,slope_limiter):
+    def poly_reconstruction(self,BasisWeights,cell_indicator,cell_quantites,slope_limiter,reconstruct_method = "Baseline"):
         weights = np.reshape(BasisWeights,(self.K,self.N))
-        Dfunc = lambda x,i:sum([weights[i][j]*self.Dbasis[j](x) for j in range(self.N)])
 
         for e in range(self.K):
             if cell_indicator[e,0]:
                 #step 2. use a suitable limiter to reconstructing the polynomial solution
+                if reconstruct_method == "Baseline":
                 # Baseline Reconstructer
-                # left_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
-                # right_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
-                # weights[e,:] = 0.
-                # weights[e,0] = (left_interface_value + right_interface_value)/2
-                # weights[e,1] = (left_interface_value - right_interface_value)/2
-                
+                    left_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                    right_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                    weights[e,:] = 0.
+                    weights[e,0] = (left_interface_value + right_interface_value)/2
+                    weights[e,1] = (left_interface_value - right_interface_value)/2
+                elif reconstruct_method == "MUSCL":
                 # classic MUSCL reconstruction
-                slope = slope_limiter(weights[e,1], 
-                    (cell_quantites[e,0] - cell_quantites[e-1,0])/(self.delta_x[e]), 
-                    (cell_quantites[e+1 if e<self.K-1 else 0,0] - cell_quantites[e,0])/(self.delta_x[e]),self.delta_x[e])
-                weights[e,:] = 0.
-                weights[e,0] = cell_quantites[e,0]
-                weights[e,1] = slope
+                    slope = slope_limiter(weights[e,1], 
+                        (cell_quantites[e,0] - cell_quantites[e-1,0])/(self.delta_x[e]), 
+                        (cell_quantites[e+1 if e<self.K-1 else 0,0] - cell_quantites[e,0])/(self.delta_x[e]),self.delta_x[e])
+                    weights[e,:] = 0.
+                    weights[e,0] = cell_quantites[e,0]
+                    weights[e,1] = slope
+                elif reconstruct_method == "WENO":
+                    #TODO
+                    raise NotImplemented
         return weights
         
 
-    def reset(self,init_func,flux,space_interval,ele_num = 32):
+    def reset(self,init_func,flux,space_interval,ele_num = 32,alpha = 0):
         # space partition
         self.space_interval = space_interval
         self.K = ele_num
@@ -142,14 +152,22 @@ class CL_Solver:
         self.delta_x = np.diff(self.x_node)
         self.x_h = np.vstack([self.x_node[0:-1],self.x_node[1:]]).T
 
+        # artifical viscosity paramater
+        
+        self.alpha = alpha
+        if alpha:
+            print("********")
+
         # transfer the initial function to basis weights
         ExactRHS = np.zeros((self.N,self.K))
         for n in range(self.N):
             for k in range(self.K):
                 ExactRHS[n][k] = integrate.quad(lambda x:init_func(x)*self.basis[n]((2*x - (self.x_h[k][0]+self.x_h[k][1]))/self.delta_x[k]),self.x_h[k][0],self.x_h[k][1])[0]/(self.delta_x[k]/2)
-
         BasisWeights = np.linalg.solve(self.mass_matrix,ExactRHS)
         BasisWeights = np.reshape(BasisWeights,(self.N*self.K,1),order="F")
+        
+        self.Trouble_Cell = np.zeros((self.K,1),dtype=np.bool8)
+
         self.BasisWeights = BasisWeights
 
         self.WeightContainer = self.BasisWeights
@@ -166,9 +184,8 @@ class CL_Solver:
             init_flux.append(init_func(x))
         self.max_dflux = np.max(np.abs(dflux(np.array(init_flux))))
 
-        self.Trouble_Cell = np.zeros((self.K,1),dtype=np.bool8)
 
-    def step(self,delta_t,evolution_method="Euler"):
+    def step(self,delta_t,evolution_method):
         assert evolution_method in ["RK3","RK2","Euler"]
         if evolution_method == "RK3":
             # TDV-RK3 method
@@ -233,10 +250,10 @@ class CL_Solver:
     def render(self,save = False):
         node_point,solu_value = self.get_node_value()
 
-        # f = transfer_wave(self.init_func,self.space_interval,2)
+        f = transfer_wave(self.init_func,self.space_interval,1)
         
         fig,ax = plt.subplots() 
-        # real_line, = ax.plot(node_point,f(node_point,0),"r.-")        
+        real_line, = ax.plot(node_point,f(node_point,0),"r.-")        
         line, = ax.plot(node_point,solu_value[0],"b")
 
         def init():
@@ -247,12 +264,12 @@ class CL_Solver:
             return line,
 
         def update(t):
-            # real_line.set_ydata(f(node_point,t*self.delta_t))
+            real_line.set_ydata(f(node_point,t*self.delta_t))
             line.set_ydata(solu_value[t,:])
             ax.set_title(f"t = {self.delta_t*t:.4f}s")
-            return line,#real_line
+            return line,real_line
         
-        ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = False)
+        ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = True)
         plt.show()
 
     def draw_allT(self):
@@ -298,14 +315,15 @@ class CL_Solver:
 if __name__ == "__main__":
     #config
     basis = legendre_basis
-    basis_order = 3
-    init_func = sine_wave
-    space_interval = 0,1
-    flux = lambda x:x**2/2
+    basis_order = 4
+    init_func = multi_wave
+    space_interval = 0,1.4
+    flux = lambda x:x
     ele_num = 100
     final_time = .1
-    cfl = 0.05
+    cfl = 0
     evolution_method = ["Euler","RK2","RK3"][2]
+    alpha = 0.1 # artifical_viscosity paramater
     use_limiter = True
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
@@ -314,5 +332,5 @@ if __name__ == "__main__":
     render = True
 
     solver = CL_Solver(basis,basis_order)
-    solver.reset(init_func, flux ,space_interval,ele_num)
+    solver.reset(init_func, flux ,space_interval,ele_num,alpha)
     solver.solve(final_time,cfl,evolution_method,use_limiter,slope_limiter,render)
