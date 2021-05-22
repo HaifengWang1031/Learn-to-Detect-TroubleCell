@@ -5,6 +5,7 @@ import matplotlib.animation as animation
 import sympy
 from tqdm import trange
 
+
 if __name__ == "__main__":
     from utils import *
 else:
@@ -74,7 +75,7 @@ class CL_Solver:
     def Limiter(self,BasisWeights,slope_limiter):
         cell_quantites = self.limiter_quantites(BasisWeights)
         cell_indicator = self.trouble_cell_indicator(cell_quantites,slope_limiter)
-        weights = self.poly_reconstruction(BasisWeights,cell_indicator,cell_quantites,slope_limiter)
+        weights = self.poly_reconstruction(BasisWeights,cell_indicator,cell_quantites,minmod_limiter)
 
         ReconstructedWeight = weights.reshape(-1,1)
         return ReconstructedWeight
@@ -316,19 +317,21 @@ if __name__ == "__main__":
     #config
     basis = legendre_basis
     basis_order = 4
-    init_func = b_l_initial
+    init_func = sine_wave
     space_interval = 0,1
-    flux = lambda x:x
-    ele_num = 100
+    flux = [lambda x:x, # advection equation
+            lambda x:x**2/2, #burgers equation
+            lambda x:4*x**2/(4*x**2+(1-x)**2)][0] #Buckley–Leverett 
+    ele_num = 400
     final_time = .1
-    cfl = 0.1
+    cfl = 0.05
     evolution_method = ["Euler","RK2","RK3"][2]
     alpha = 0 # artifical_viscosity paramater
-    use_limiter = False
+    use_limiter = True
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,100), # TVB-2
-                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][2] # TVB-3
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][1] # TVB-3
     render = True
 
     solver = CL_Solver(basis,basis_order)
