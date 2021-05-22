@@ -1,7 +1,7 @@
 import os,sys
 sys.path.append(os.getcwd())
 
-import gym 
+import gym
 from gym import spaces
 import numpy as np
 from DG import conservation_law
@@ -22,15 +22,16 @@ class Advection_Envs(gym.Env):
         self.final_T = final_T
 
         self.real_wave = transfer_wave(self.init_func,self.interval,self.c)
-        
+        self.first_derivative_weights = 1
+
         self.flux = lambda x:self.c*x
         self.cfl = 0.1/np.abs(self.c)
-        
+
         self.solver.reset(self.init_func,self.flux,self.interval,self.ele_num)
         self.delta_t =  self.cfl*np.max(self.solver.delta_x)
         self.solver.delta_t = self.delta_t
 
-        self.solver.BasisWeights = self.solver.step(self.delta_t,evolution_method = "Euler")
+        self.solver.BasisWeights = self.solver.step(self.delta_t,evolution_method = "RK3")
         self.done = False
         self.current_time = self.delta_t
         self.cell_quantites = self.solver.limiter_quantites(self.solver.BasisWeights)
@@ -54,15 +55,32 @@ class Advection_Envs(gym.Env):
         return self.cell_quantites,reward,self.done,[]
 
     def calcu_reward(self,weights,time):
-        #TODO
-        return np.zeros((len(weights),1))
-        
+        gauss_point = np.array([-0.90618,-0.538469,0,0.90618,0.538469])
+        gauss_weight = np.array([0.236927,0.478629,128/255,0.478629,0.236927])
+        current_wave = lambda x: self.real_wave(x,time)
+        reward = np.zeros((self.solver.K,1))
+        for i in range(self.solver.K):
+            ele_interval = self.solver.x_h[i,:]
+            ele_weights = weights[i,:]
+            ele_func = lambda x:sum([weights[i][j]*self.solver.basis[j](x) for j in range(self.solver.N)])
+            ele_dfunc = lambda x:sum([weights[i][j]*self.solver.Dbasis[j](x) for j in range(self.solver.N)])
+            # h2 error
+            h2_error = sum([gauss_weight[i]*np.abs(ele_func(x) - current_wave(x*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2)) for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
+            # l1 error
+            # print(h2_error)
+            l1_error = sum([gauss_weight[i]*np.abs(ele_dfunc(x) -\
+                            (current_wave((x + 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2) -\
+                             current_wave((x - 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2))/0.002)\
+                           for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
+            reward[i,0] = -np.log10(h2_error) - self.first_derivative_weights*np.log10(l1_error)
+        return reward
+
 
     def render(self,):
         self.solver.render()
         self.solver.draw_troubleCell()
 
-        
+
 if __name__ == "__main__":
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
@@ -70,14 +88,14 @@ if __name__ == "__main__":
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][2] # TVB-3
 
     e = Advection_Envs()
-    
-    obs = e.reset(compound_wave,[-4,4],1,100,1)
-    print(obs.shape)
+
+    obs = e.reset(compound_wave,[-4,4],.1,100,1)
+    # print(obs.shape)
     for i in range(1):
         action = e.solver.trouble_cell_indicator(obs,slope_limiter)
-        print(action.shape)
+        # print(action.shape)
         obs,reward,done,info = e.step(action)
         if done:
             break
-    e.render()
-    
+
+

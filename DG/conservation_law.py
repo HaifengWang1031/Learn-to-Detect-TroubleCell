@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.core.fromnumeric import repeat
 import scipy.integrate as integrate
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -125,11 +124,11 @@ class CL_Solver:
                 #step 2. use a suitable limiter to reconstructing the polynomial solution
                 if reconstruct_method == "Baseline":
                 # Baseline Reconstructer
-                    left_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
-                    right_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                    left_interface_value = cell_quantites[e,0] - slope_limiter(cell_quantites[e,3], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
+                    right_interface_value = cell_quantites[e,0] + slope_limiter(cell_quantites[e,4], cell_quantites[e,1], cell_quantites[e,2],self.delta_x[e])
                     weights[e,:] = 0.
                     weights[e,0] = (left_interface_value + right_interface_value)/2
-                    weights[e,1] = (left_interface_value - right_interface_value)/2
+                    weights[e,1] = (right_interface_value - left_interface_value)/2
                 elif reconstruct_method == "MUSCL":
                 # classic MUSCL reconstruction
                     slope = slope_limiter(weights[e,1], 
@@ -139,6 +138,7 @@ class CL_Solver:
                     weights[e,0] = cell_quantites[e,0]
                     weights[e,1] = slope
                 elif reconstruct_method == "WENO":
+                # WENO reconstruction
                     #TODO
                     raise NotImplemented
         return weights
@@ -155,8 +155,6 @@ class CL_Solver:
         # artifical viscosity paramater
         
         self.alpha = alpha
-        if alpha:
-            print("********")
 
         # transfer the initial function to basis weights
         ExactRHS = np.zeros((self.N,self.K))
@@ -249,12 +247,14 @@ class CL_Solver:
 
     def render(self,save = False):
         node_point,solu_value = self.get_node_value()
-
         f = transfer_wave(self.init_func,self.space_interval,1)
-        
-        fig,ax = plt.subplots() 
+        real_value = lambda t:f(node_point,t)
+
+        fig,ax = plt.subplots()
         real_line, = ax.plot(node_point,f(node_point,0),"r.-")        
         line, = ax.plot(node_point,solu_value[0],"b")
+        ax.set_title(f"t = 0s, error = {np.max(np.abs(solu_value[0] - real_value(0)))}")
+        
 
         def init():
             ax.set_xlim(self.space_interval[0],self.space_interval[1])
@@ -265,11 +265,11 @@ class CL_Solver:
 
         def update(t):
             real_line.set_ydata(f(node_point,t*self.delta_t))
-            line.set_ydata(solu_value[t,:])
-            ax.set_title(f"t = {self.delta_t*t:.4f}s")
+            line.set_ydata(solu_value[t])
+            ax.set_title(f"t = {self.delta_t*t:.4f}s, error = {np.max(np.abs(solu_value[t] - real_value(self.delta_t*t)))}")
             return line,real_line
         
-        ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = True)
+        ani = animation.FuncAnimation(fig, update,range(1,len(solu_value)), interval=100, init_func = init,repeat = False)
         plt.show()
 
     def draw_allT(self):
@@ -316,19 +316,19 @@ if __name__ == "__main__":
     #config
     basis = legendre_basis
     basis_order = 4
-    init_func = multi_wave
-    space_interval = 0,1.4
+    init_func = b_l_initial
+    space_interval = 0,1
     flux = lambda x:x
     ele_num = 100
     final_time = .1
-    cfl = 0
+    cfl = 0.1
     evolution_method = ["Euler","RK2","RK3"][2]
-    alpha = 0.1 # artifical_viscosity paramater
-    use_limiter = True
+    alpha = 0 # artifical_viscosity paramater
+    use_limiter = False
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,100), # TVB-2
-                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][3] # TVB-3
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][2] # TVB-3
     render = True
 
     solver = CL_Solver(basis,basis_order)
