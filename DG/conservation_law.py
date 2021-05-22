@@ -75,7 +75,7 @@ class CL_Solver:
     def Limiter(self,BasisWeights,slope_limiter):
         cell_quantites = self.limiter_quantites(BasisWeights)
         cell_indicator = self.trouble_cell_indicator(cell_quantites,slope_limiter)
-        weights = self.poly_reconstruction(BasisWeights,cell_indicator,cell_quantites,minmod_limiter)
+        weights = self.poly_reconstruction(BasisWeights,cell_indicator,cell_quantites,slope_limiter)
 
         ReconstructedWeight = weights.reshape(-1,1)
         return ReconstructedWeight
@@ -317,14 +317,14 @@ if __name__ == "__main__":
     #config
     basis = legendre_basis
     basis_order = 4
-    init_func = sine_wave
+    init_func = shock_collision
     space_interval = 0,1
     flux = [lambda x:x, # advection equation
             lambda x:x**2/2, #burgers equation
             lambda x:4*x**2/(4*x**2+(1-x)**2)][0] #Buckley–Leverett 
-    ele_num = 400
+    ele_num = 100
     final_time = .1
-    cfl = 0.05
+    cfl = 0.1
     evolution_method = ["Euler","RK2","RK3"][2]
     alpha = 0 # artifical_viscosity paramater
     use_limiter = True

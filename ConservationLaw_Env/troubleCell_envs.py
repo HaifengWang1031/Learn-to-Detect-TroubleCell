@@ -6,12 +6,13 @@ from gym import spaces
 import numpy as np
 from DG import conservation_law
 from DG.utils import *
+import warnings
+warnings.filterwarnings("error")
 
 class Advection_Envs(gym.Env):
     def __init__(self,basis_order = 4):
         self.solver = conservation_law.CL_Solver(legendre_basis,basis_order)
 
-        self.obseravtion_space = spaces.Box(low = np.finfo(np.float32).min,high = np.finfo(np.float32).max,shape=(7,))
         self.action_space = spaces.Discrete(2)
 
     def reset(self,init_func,interval,final_T,ele_num,velocity):
@@ -45,11 +46,14 @@ class Advection_Envs(gym.Env):
         self.solver.WeightContainer = np.concatenate((self.solver.WeightContainer,self.solver.BasisWeights),axis = 1)
 
         # calculate next obs
-        self.solver.BasisWeights = self.solver.step(self.delta_t,evolution_method = "RK3")
-        self.cell_quantites = self.solver.limiter_quantites(self.solver.BasisWeights)
+        try:
+            self.solver.BasisWeights = self.solver.step(self.delta_t,evolution_method = "RK3")
+            self.cell_quantites = self.solver.limiter_quantites(self.solver.BasisWeights)
 
-        self.current_time += self.delta_t
-        if self.current_time> self.final_T:
+            self.current_time += self.delta_t
+            if self.current_time> self.final_T:
+                self.done = True
+        except Exception as e:
             self.done = True
 
         return self.cell_quantites,reward,self.done,[]
@@ -67,12 +71,11 @@ class Advection_Envs(gym.Env):
             # h2 error
             h2_error = sum([gauss_weight[i]*np.abs(ele_func(x) - current_wave(x*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2)) for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
             # l1 error
-            # print(h2_error)
             l1_error = sum([gauss_weight[i]*np.abs(ele_dfunc(x) -\
                             (current_wave((x + 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2) -\
                              current_wave((x - 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2))/0.002)\
                            for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
-            reward[i,0] = -np.log10(h2_error) - self.first_derivative_weights*np.log10(l1_error)
+            reward[i,0] = -np.log10(h2_error + 1e-18) - self.first_derivative_weights*np.log10(l1_error + 1e-18)
         return reward
 
 
@@ -90,12 +93,17 @@ if __name__ == "__main__":
     e = Advection_Envs()
 
     obs = e.reset(compound_wave,[-4,4],.1,100,1)
+    import torch
+    # print(torch.FloatTensor(obs).to("cpu").shape)
     # print(obs.shape)
-    for i in range(1):
-        action = e.solver.trouble_cell_indicator(obs,slope_limiter)
+    while True:
+        action = e.solver.trouble_cell_indicator(obs,slope_limiter).astype(np.int8)
+        print(action.shape)
         # print(action.shape)
         obs,reward,done,info = e.step(action)
+        print(reward.sum(),done)
         if done:
             break
+    e.render()
 
 
