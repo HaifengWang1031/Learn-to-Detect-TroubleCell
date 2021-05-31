@@ -26,7 +26,7 @@ class Advection_Envs(gym.Env):
         self.first_derivative_weights = 1
 
         self.flux = lambda x:self.c*x
-        self.cfl = 0.1/np.abs(self.c)
+        self.cfl = 0.1/np.abs(self.c)/2
 
         self.solver.reset(self.init_func,self.flux,self.interval,self.ele_num)
         self.delta_t =  self.cfl*np.max(self.solver.delta_x)
@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
     e = Advection_Envs()
 
-    obs = e.reset(b_l_initial,[0,1],.3,100,1)
+    obs = e.reset(compound_wave,[-4,4],.1,400,1)
     import torch
     import torch.nn as nn
     import torch.nn.functional as f
@@ -114,9 +114,8 @@ if __name__ == "__main__":
         # action = e.solver.trouble_cell_indicator(obs,slope_limiter).astype(np.int8)
         value,logit =model.forward(torch.FloatTensor(obs))
         logp = f.log_softmax(logit,dim=1)
-        action = torch.exp(logp)#.multinomial(num_samples=1).numpy()
-
-        action = torch.where(action[:,1]>0.7,1,0).view((-1,1))
+        action = torch.exp(logp).multinomial(num_samples=1).numpy()
+        # action = torch.where(action[:,1]>0.7,1,0).view((-1,1))
 
         e.solver.Trouble_Cell = np.concatenate((e.solver.Trouble_Cell,action),axis =1)
 
