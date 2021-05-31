@@ -10,6 +10,7 @@ import numpy as np
 from ConservationLaw_Env.troubleCell_envs import Advection_Envs
 from DG.utils import *
 import argparse
+import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -46,11 +47,11 @@ class NNPolicy(nn.Module):
 def cost_func():
     pass
 
-def train(shared_model,optim,args):
+def train(shared_model,optim,rank,args):
     env = Advection_Envs()
     model = NNPolicy(feature_size = 7,hidden_units = args.hidden,num_action = env.action_space.n).to(device)
     
-    for _ in range(args.epoch):
+    for _ in (range(args.epoch) if rank>0 else tqdm.trange(args.epoch)):
         model.load_state_dict(shared_model.state_dict()) # sync with shared vector
         obs = torch.FloatTensor(env.reset(*random.choice(init_state))).to(device)
 
@@ -92,18 +93,17 @@ def train(shared_model,optim,args):
 if __name__ == "__main__":
     args = get_args()
 
-    
     shared_model = NNPolicy(7,args.hidden,2)
     optim = torch.optim.Adam(shared_model.parameters(),lr = args.lr)
 
     processes = []
     for rank in range(args.Processes):
-        p = mp.Process(target = train,args = (shared_model,optim,args))
+        p = mp.Process(target = train,args = (shared_model,optim,rank,args))
         p.start()
         processes.append(p)
 
     for p in processes:
         p.join()
 
-    
+
     torch.save(shared_model,'model.pkl')

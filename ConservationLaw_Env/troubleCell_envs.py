@@ -75,7 +75,7 @@ class Advection_Envs(gym.Env):
                             (current_wave((x + 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2) -\
                              current_wave((x - 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2))/0.002)\
                            for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
-            reward[i,0] = -np.log10(h2_error + 1e-18) - self.first_derivative_weights*np.log10(l1_error + 1e-18)
+            reward[i,0] = -np.log10(h2_error + 1e-18) - 0.01*self.first_derivative_weights*np.log10(l1_error + 1e-18)
         return reward
 
 
@@ -88,20 +88,39 @@ if __name__ == "__main__":
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,100), # TVB-2
-                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][2] # TVB-3
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][1] # TVB-3
 
     e = Advection_Envs()
 
-    obs = e.reset(compound_wave,[-4,4],.1,100,1)
+    obs = e.reset(b_l_initial,[0,1],.3,100,1)
     import torch
-    # print(torch.FloatTensor(obs).to("cpu").shape)
-    # print(obs.shape)
+    import torch.nn as nn
+    import torch.nn.functional as f
+
+    class NNPolicy(nn.Module):
+        def __init__(self,feature_size,hidden_units,num_action):
+            super().__init__()
+            self.linear1 = nn.Linear(feature_size,hidden_units)
+            self.linear2 = nn.Linear(hidden_units,hidden_units)
+            self.critic_linear, self.actor_linear = nn.Linear(hidden_units,1),nn.Linear(hidden_units,num_action)
+    
+        def forward(self,inputs):
+            x = f.elu(self.linear1(inputs))
+            x = f.elu(self.linear2(x))
+            return self.critic_linear(x),self.actor_linear(x)
+    model = torch.load('model.pkl')
+    
     while True:
-        action = e.solver.trouble_cell_indicator(obs,slope_limiter).astype(np.int8)
-        print(action.shape)
-        # print(action.shape)
+        # action = e.solver.trouble_cell_indicator(obs,slope_limiter).astype(np.int8)
+        value,logit =model.forward(torch.FloatTensor(obs))
+        logp = f.log_softmax(logit,dim=1)
+        action = torch.exp(logp)#.multinomial(num_samples=1).numpy()
+
+        action = torch.where(action[:,1]>0.7,1,0).view((-1,1))
+
+        e.solver.Trouble_Cell = np.concatenate((e.solver.Trouble_Cell,action),axis =1)
+
         obs,reward,done,info = e.step(action)
-        print(reward.sum(),done)
         if done:
             break
     e.render()

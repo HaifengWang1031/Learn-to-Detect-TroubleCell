@@ -140,6 +140,7 @@ class CL_Solver:
                     weights[e,1] = slope
                 elif reconstruct_method == "WENO":
                 # WENO reconstruction
+                    
                     #TODO
                     raise NotImplemented
         return weights
@@ -321,7 +322,7 @@ if __name__ == "__main__":
     space_interval = 0,1
     flux = [lambda x:x, # advection equation
             lambda x:x**2/2, #burgers equation
-            lambda x:4*x**2/(4*x**2+(1-x)**2)][0] #Buckley–Leverett 
+            lambda x:4*x**2/(4*x**2+(1-x)**2)][1] #Buckley–Leverett 
     ele_num = 100
     final_time = .1
     cfl = 0.1
