@@ -86,6 +86,10 @@ def train(shared_model,optim,rank,args):
 
             if done:
                 break
+            
+            obs = new_obs
+
+    torch.save(shared_model,f"model-{rank}.pkl")
         
 
 

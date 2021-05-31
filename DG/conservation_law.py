@@ -318,13 +318,13 @@ if __name__ == "__main__":
     #config
     basis = legendre_basis
     basis_order = 4
-    init_func = shock_collision
+    init_func = sine_wave
     space_interval = 0,1
     flux = [lambda x:x, # advection equation
             lambda x:x**2/2, #burgers equation
-            lambda x:4*x**2/(4*x**2+(1-x)**2)][1] #Buckley–Leverett 
+            lambda x:4*x**2/(4*x**2+(1-x)**2)][0] #Buckley–Leverett 
     ele_num = 100
-    final_time = .1
+    final_time = 1
     cfl = 0.1
     evolution_method = ["Euler","RK2","RK3"][2]
     alpha = 0 # artifical_viscosity paramater
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     slope_limiter = [minmod_limiter, #minmod
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,10), # TVB-1
                     lambda a,b,c,h:TVB_limiter(a,b,c,h,100), # TVB-2
-                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][1] # TVB-3
+                    lambda a,b,c,h:TVB_limiter(a,b,c,h,1000)][0] # TVB-3
     render = True
 
     solver = CL_Solver(basis,basis_order)

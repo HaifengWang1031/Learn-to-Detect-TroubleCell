@@ -75,7 +75,7 @@ class Advection_Envs(gym.Env):
                             (current_wave((x + 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2) -\
                              current_wave((x - 0.001)*(ele_interval[1] - ele_interval[0])/2 + (ele_interval[0] + ele_interval[1])/2))/0.002)\
                            for i,x in enumerate(gauss_point)])*(ele_interval[1]-ele_interval[0])/2
-            reward[i,0] = -np.log10(h2_error + 1e-18) - 0.01*self.first_derivative_weights*np.log10(l1_error + 1e-18)
+            reward[i,0] = -np.log10(h2_error + 1e-18) - 10*self.first_derivative_weights*np.log10(l1_error + 1e-18)
         return reward
 
 
