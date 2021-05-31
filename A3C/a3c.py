@@ -7,12 +7,15 @@ import torch.nn as nn
 import torch.nn.functional as f
 import torch.multiprocessing as mp
 import numpy as np
+from scipy.signal import lfilter
 from ConservationLaw_Env.troubleCell_envs import Advection_Envs
 from DG.utils import *
 import argparse
 import tqdm
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+discount = lambda x, gamma: lfilter([1],[1,-gamma],x[:,::-1])[:,::-1] # discounted rewards one liner
 
 init_state = [
     [sine_wave,[0,1],.5,100,1],
@@ -24,9 +27,10 @@ init_state = [
 
 def get_args():
     parser = argparse.ArgumentParser(description = None)
-    parser.add_argument("--Processes",default=20,type=int)
-    parser.add_argument("--epoch",default=200,type=int)
+    parser.add_argument("--Processes",default=8,type=int)
+    parser.add_argument("--epoch",default=30,type=int)
     parser.add_argument("--lr",default=1e-4,type=float)
+    parser.add_argument('--tau', default=1.0, type=float)
     parser.add_argument("--gamma",default=0.99,type=float)
     parser.add_argument("--hidden",default=64,type=int)
 
@@ -62,50 +66,66 @@ class SharedAdam(torch.optim.Adam): # extend a pytorch optimizer so it shares gr
                     self.state[p]['step'] = self.state[p]['shared_steps'][0] - 1 # a "step += 1"  comes later
             super.step(closure)
 
-def cost_func():
-    pass
+def cost_func(args, values, logps, actions, rewards):
+    np_values = values.data.numpy()
+    # generalized advantage estimation using \delta_t residuals (a policy gradient method)
+    delta_t = np.asarray(rewards) + args.gamma * np_values[:,1:] - np_values[:,:-1]
+    logpys = logps.view(-1,2).gather(1,actions.clone().detach().view(-1,1)).view(actions.shape)
+
+    gen_adv_est = discount(delta_t, args.gamma * args.tau)
+    policy_loss = -(logpys * torch.FloatTensor(gen_adv_est.copy())).sum()
+    
+    # l2 loss over value estimator
+    rewards[:,-1] += args.gamma * np_values[:,-1]
+    discounted_r = discount(np.asarray(rewards), args.gamma)
+    discounted_r = torch.tensor(discounted_r.copy(), dtype=torch.float32)
+    value_loss = .5 * (discounted_r - values[:,:-1]).pow(2).sum()
+
+    entropy_loss = (-logps * torch.exp(logps)).sum() # entropy definition, for entropy regularization
+    return policy_loss + 0.5 * value_loss - 0.01 * entropy_loss
 
 def train(shared_model,optim,rank,args):
     env = Advection_Envs()
     model = NNPolicy(feature_size = 7,hidden_units = args.hidden,num_action = env.action_space.n).to(device)
     
+    model.load_state_dict(shared_model.state_dict()) # sync with shared vector
+    values,logps,actions,rewards = [],[],[],[]
+
     for _ in (range(args.epoch) if rank>0 else tqdm.trange(args.epoch)):
-        model.load_state_dict(shared_model.state_dict()) # sync with shared vector
         obs = torch.FloatTensor(env.reset(*random.choice(init_state))).to(device)
 
+        counter = 0
         while True:
             value, logit = model(obs)
             logp = f.log_softmax(logit,dim=1)
 
             action = torch.exp(logp).multinomial(num_samples=1)
-            new_obs,reward,done,_ = env.step(action.numpy())
-            new_obs = torch.FloatTensor(new_obs).to(device)
-            reward = torch.FloatTensor(reward).to(device)
+            obs,reward,done,_ = env.step(action.numpy())
+            obs = torch.FloatTensor(obs).to(device)
 
-            with torch.no_grad():
-                next_value,_ = model(new_obs)
-                v_target = reward + args.gamma*next_value
-                advantage_value = v_target - value
+            values.append(value); logps.append(logp); actions.append(action); rewards.append(reward)
 
-            # critic loss
-            value_loss = .5*f.mse_loss(value,v_target)            
+            if counter == 9 or done:
+                next_value,_ = model(obs)
+                values.append(next_value.detach())
+                loss = cost_func(args, torch.cat(values,dim=1),torch.cat(logps,dim = 1),torch.cat(actions,dim = 1),np.hstack(rewards))
 
-            # actor loss
-            policy_loss = -0.5*(logp*advantage_value).sum() - 0.01*(logp*torch.exp(logp)).sum()
+                optim.zero_grad()
+                loss.backward() 
+                torch.nn.utils.clip_grad_norm_(model.parameters(),40)
+                for param, shared_param in zip(model.parameters(),shared_model.parameters()):
+                    if shared_param.grad is None:    
+                        shared_param._grad = param.grad
+                optim.step()
 
-            loss = value_loss + policy_loss
-
-            optim.zero_grad(); loss.backward() 
-            torch.nn.utils.clip_grad_norm_(model.parameters(),40)
-            for param, shared_param in zip(model.parameters(),shared_model.parameters()):
-                if shared_param.grad is None:    
-                    shared_param._grad = param.grad
-            optim.step()
-
+                model.load_state_dict(shared_model.state_dict())
+                values,logps,actions,rewards = [],[],[],[]
+                counter = 0
+            else:
+                counter += 1
+            
             if done:
                 break
-            
-            obs = new_obs
 
     torch.save(shared_model,f"model-{rank}.pkl")
         
