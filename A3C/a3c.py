@@ -27,11 +27,11 @@ init_state = [
 
 def get_args():
     parser = argparse.ArgumentParser(description = None)
-    parser.add_argument("--Processes",default=8,type=int)
-    parser.add_argument("--epoch",default=30,type=int)
+    parser.add_argument("--Processes",default=1,type=int)
+    parser.add_argument("--epoch",default=1,type=int)
     parser.add_argument("--lr",default=1e-4,type=float)
     parser.add_argument('--tau', default=1.0, type=float)
-    parser.add_argument("--gamma",default=0.99,type=float)
+    parser.add_argument("--gamma",default=0.95,type=float)
     parser.add_argument("--hidden",default=64,type=int)
 
     return parser.parse_args()
@@ -136,7 +136,8 @@ if __name__ == "__main__":
     args = get_args()
 
     shared_model = NNPolicy(7,args.hidden,2)
-    optim = SharedAdam(shared_model.parameters(),lr = args.lr)
+    # optim = SharedAdam(shared_model.parameters(),lr = args.lr)
+    optim = torch.optim.Adam(shared_model.parameters(),lr = args.lr)
 
     processes = []
     for rank in range(args.Processes):
